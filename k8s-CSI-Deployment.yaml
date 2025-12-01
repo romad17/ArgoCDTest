@@ -1,0 +1,77 @@
+# 1. StorageClass for AWS EBS (gp3 type)
+# This defines how EBS volumes are provisioned.
+# If your EKS cluster already has a default StorageClass (e.g., gp2 or gp3),
+# you might not need to define this explicitly, but it's good for clarity
+# or if you need specific configurations.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ebs-gp3-sc # The name remains the same, but the type is updated
+provisioner: ebs.csi.aws.com # This requires the AWS EBS CSI driver to be installed on your EKS cluster.
+parameters:
+  type: gp3          # Changed to gp3 (General Purpose SSD, newer generation)
+  fsType: ext4       # Filesystem type for the volume (common for Linux)
+reclaimPolicy: Delete # When the PVC is deleted, the underlying EBS volume will also be deleted.
+volumeBindingMode: WaitForFirstConsumer # The volume will only be provisioned when a Pod needing it is scheduled.
+---
+# 2. PersistentVolumeClaim (PVC)
+# This is what your Pod requests. It's a request for storage with specific characteristics.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-ebs-pvc # Name of your PersistentVolumeClaim
+spec:
+  accessModes:
+    - ReadWriteOnce # This means the volume can be mounted as read-write by a single node.
+  resources:
+    requests:
+      storage: 105Gi # Request 1 Gigabyte of storage. Adjust as needed.
+  storageClassName: ebs-gp3-sc # References the StorageClass defined above.
+---
+# 3. Deployment
+# This defines your application's Pod and tells it to use the PVC.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-with-ebs
+  labels:
+    app: my-app
+spec:
+  replicas: 1 # We want a single replica of our application.
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname # Or any other node label you want to use
+                    operator: In
+                    values:
+                      - ip-10-0-1-161.ec2.internal # Replace with the actual name of your node
+      volumes:
+        - name: ebs-storage # This name is used to reference the volume within the Pod's containers.
+          persistentVolumeClaim:
+            claimName: my-ebs-pvc # References the PVC defined above.
+      containers:
+        - name: my-nginx-container
+          image: nginx:latest # A simple Nginx image for demonstration.
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: ebs-storage # Mounts the volume named 'ebs-storage'
+              mountPath: /usr/share/nginx/html # Path inside the container where the EBS volume will be mounted.
+              # Any data written to this path will persist on the EBS volume.
+          # Adding a command to write a simple index.html to demonstrate persistence
+          # This command will run only once when the container starts for the first time
+          # if the volume is empty. If data already exists, it won't overwrite.
+          command: ["/bin/sh", "-c"]
+          args:
+            - echo "<h1>Hello from my EBS Volume!</h1>" > /usr/share/nginx/html/index.html &&
+              nginx -g "daemon off;"
