@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-ebs-csi-driver
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+    targetRevision: v2.53.0
+    chart: aws-ebs-csi-driver
+    helm:
+      values: |
+        controller:
+          serviceAccount:
+            create: false # Set to false since we created it manually/with eksctl
+            name: ebs-csi-controller-sa 
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
